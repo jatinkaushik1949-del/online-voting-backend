@@ -90,8 +90,27 @@ voterSchema.index({ mobile: 1 }, { unique: true });
 
 const voteSchema = new mongoose.Schema(
   {
-    party: { type: String, required: true, trim: true },
-    voterEmail: { type: String, required: true, trim: true, lowercase: true },
+    candidateId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Candidate",
+      required: true,
+    },
+    candidateName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    partyName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    voterEmail: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+    },
   },
   { timestamps: true }
 );
@@ -594,24 +613,16 @@ app.post("/api/admin/approve", async (req, res) => {
 
 app.post("/api/vote", async (req, res) => {
   try {
-    const { email, party } = req.body || {};
+    const { email, candidateId } = req.body || {};
 
-    if (!email || !party) {
+    if (!email || !candidateId) {
       return res.status(400).json({
         success: false,
-        message: "Email and party are required",
+        message: "Email and candidate are required",
       });
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
-    const cleanParty = normalizeParty(party);
-
-    if (!allowedParties.includes(cleanParty)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid party selected",
-      });
-    }
 
     const election = await getLatestElection();
 
@@ -619,6 +630,15 @@ app.post("/api/vote", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Voting is currently closed",
+      });
+    }
+
+    const candidate = await Candidate.findById(candidateId);
+
+    if (!candidate || !candidate.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: "Candidate not found",
       });
     }
 
@@ -632,7 +652,7 @@ app.post("/api/vote", async (req, res) => {
       {
         $set: {
           hasVoted: true,
-          votedParty: cleanParty,
+          votedParty: candidate.partyName,
         },
       },
       { new: true }
@@ -677,7 +697,9 @@ app.post("/api/vote", async (req, res) => {
 
     try {
       const newVote = new Vote({
-        party: cleanParty,
+        candidateId: candidate._id,
+        candidateName: candidate.candidateName,
+        partyName: candidate.partyName,
         voterEmail: cleanEmail,
       });
 
@@ -716,12 +738,69 @@ app.post("/api/vote", async (req, res) => {
   }
 });
 
+    try {
+      const newVote = new Vote({
+        party: cleanParty,
+        voterEmail: cleanEmail,
+      });
+
+      await newVote.save();
+    } catch (voteError) {
+      await Voter.updateOne(
+        { email: cleanEmail },
+        {
+          $set: {
+            hasVoted: false,
+            votedParty: "",
+          },
+        }
+      );
+
+      if (voteError && voteError.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already voted",
+        });
+      }
+
+      throw voteError;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Vote submitted successfully",
+    });
+  } catch (error) {
+    console.error("Vote route crash:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Vote submit failed",
+    });
+  }
+
 app.get("/api/results", async (req, res) => {
   try {
     const results = await Vote.aggregate([
-      { $group: { _id: "$party", votes: { $sum: 1 } } },
-      { $project: { _id: 0, party: "$_id", votes: 1 } },
-      { $sort: { votes: -1, party: 1 } },
+      {
+        $group: {
+          _id: {
+            candidateId: "$candidateId",
+            candidateName: "$candidateName",
+            partyName: "$partyName",
+          },
+          votes: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          candidateId: "$_id.candidateId",
+          candidateName: "$_id.candidateName",
+          partyName: "$_id.partyName",
+          votes: 1,
+        },
+      },
+      { $sort: { votes: -1, candidateName: 1 } },
     ]);
 
     return res.status(200).json({
