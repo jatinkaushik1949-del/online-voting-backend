@@ -180,16 +180,19 @@ app.get("/api/election", async (req, res) => {
   }
 });
 
-app.post("/api/register", async (req, res) => {
-  try {
-    const { name, email, voterId, password, aadhaar, mobile } = req.body;
+const otp = generateOtp();
+const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    if (!name || !email || !voterId || !aadhaar || !mobile) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required",
-      });
-    }
+try {
+  await sendOtpEmail(cleanEmail, otp, cleanName);
+} catch (mailError) {
+  console.log("OTP mail send error:", mailError);
+  return res.status(500).json({
+    success: false,
+    message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
+  });
+}
+    
 
     const cleanName = String(name).trim();
     const cleanEmail = String(email).trim().toLowerCase();
@@ -385,16 +388,15 @@ app.post("/api/verify-email", async (req, res) => {
   }
 });
 
-app.post("/api/resend-otp", async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required",
-      });
-    }
+try {
+  await sendOtpEmail(voter.email, otp, voter.name);
+} catch (mailError) {
+  console.log("Resend OTP mail error:", mailError);
+  return res.status(500).json({
+    success: false,
+    message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
+  });
+}
 
     const cleanEmail = String(email).trim().toLowerCase();
     const voter = await Voter.findOne({ email: cleanEmail });
@@ -554,7 +556,7 @@ app.post("/api/admin/approve", async (req, res) => {
     voter.isApproved = true;
     await voter.save();
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: "User approved successfully",
     });
@@ -565,7 +567,6 @@ app.post("/api/admin/approve", async (req, res) => {
     });
   }
 });
-
 app.post("/api/vote", async (req, res) => {
   try {
     const { email, party } = req.body || {};
