@@ -86,6 +86,11 @@ const voterSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+voterSchema.index({ email: 1 }, { unique: true });
+voterSchema.index({ voterId: 1 }, { unique: true });
+voterSchema.index({ aadhaar: 1 }, { unique: true });
+voterSchema.index({ mobile: 1 }, { unique: true });
+
 const voteSchema = new mongoose.Schema(
   {
     party: { type: String, required: true, trim: true },
@@ -93,6 +98,8 @@ const voteSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+voteSchema.index({ voterEmail: 1 }, { unique: true });
 
 const electionSchema = new mongoose.Schema({
   title: { type: String, default: "National General Election 2026" },
@@ -137,14 +144,26 @@ const sendOtpEmail = async (toEmail, otp, name) => {
   });
 };
 
-const validateEmail = (email) =>
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validateAadhaar = (aadhaar) => /^\d{12}$/.test(aadhaar);
+const validateMobile = (mobile) => /^\d{10}$/.test(mobile);
 
-const validateAadhaar = (aadhaar) =>
-  /^\d{12}$/.test(aadhaar);
+const allowedParties = ["CONGRESS", "BJP", "BSP", "INLD"];
 
-const validateMobile = (mobile) =>
-  /^\d{10}$/.test(mobile);
+const normalizeParty = (party) => String(party || "").trim().toUpperCase();
+
+const getLatestElection = async () => {
+  let election = await Election.findOne().sort({ createdAt: -1 });
+
+  if (!election) {
+    election = await Election.create({
+      title: "National General Election 2026",
+      status: "live",
+    });
+  }
+
+  return election;
+};
 
 app.get("/", (req, res) => {
   res.send("API is running...");
@@ -152,14 +171,7 @@ app.get("/", (req, res) => {
 
 app.get("/api/election", async (req, res) => {
   try {
-    let election = await Election.findOne().sort({ createdAt: -1 });
-
-    if (!election) {
-      election = await Election.create({
-        title: "National General Election 2026",
-        status: "live",
-      });
-    }
+    const election = await getLatestElection();
 
     return res.status(200).json({ success: true, election });
   } catch (error) {
@@ -207,32 +219,35 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    const existingEmail = await Voter.findOne({ email: cleanEmail });
-    if (existingEmail) {
+    const duplicateEmailVerified = await Voter.findOne({
+      email: cleanEmail,
+      emailVerified: true,
+    });
+    if (duplicateEmailVerified) {
       return res.status(400).json({
         success: false,
         message: "Email already registered",
       });
     }
 
-    const existingVoterId = await Voter.findOne({ voterId: cleanVoterId });
-    if (existingVoterId) {
+    const duplicateVoterId = await Voter.findOne({ voterId: cleanVoterId });
+    if (duplicateVoterId && duplicateVoterId.email !== cleanEmail) {
       return res.status(400).json({
         success: false,
         message: "Voter ID already registered",
       });
     }
 
-    const existingAadhaar = await Voter.findOne({ aadhaar: cleanAadhaar });
-    if (existingAadhaar) {
+    const duplicateAadhaar = await Voter.findOne({ aadhaar: cleanAadhaar });
+    if (duplicateAadhaar && duplicateAadhaar.email !== cleanEmail) {
       return res.status(400).json({
         success: false,
         message: "Aadhaar already registered",
       });
     }
 
-    const existingMobile = await Voter.findOne({ mobile: cleanMobile });
-    if (existingMobile) {
+    const duplicateMobile = await Voter.findOne({ mobile: cleanMobile });
+    if (duplicateMobile && duplicateMobile.email !== cleanEmail) {
       return res.status(400).json({
         success: false,
         message: "Mobile number already registered",
@@ -242,26 +257,41 @@ app.post("/api/register", async (req, res) => {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    // mail pehle bhejo
     await sendOtpEmail(cleanEmail, otp, cleanName);
 
-    // mail successful ho tabhi save karo
-    const newVoter = new Voter({
-      name: cleanName,
-      email: cleanEmail,
-      voterId: cleanVoterId,
-      password: cleanPassword,
-      aadhaar: cleanAadhaar,
-      mobile: cleanMobile,
-      emailVerified: false,
-      verificationOtp: otp,
-      otpExpiresAt: expiry,
-      isApproved: false,
-      hasVoted: false,
-      votedParty: "",
-    });
+    let existingPending = await Voter.findOne({ email: cleanEmail });
 
-    await newVoter.save();
+    if (existingPending) {
+      existingPending.name = cleanName;
+      existingPending.voterId = cleanVoterId;
+      existingPending.password = cleanPassword;
+      existingPending.aadhaar = cleanAadhaar;
+      existingPending.mobile = cleanMobile;
+      existingPending.emailVerified = false;
+      existingPending.verificationOtp = otp;
+      existingPending.otpExpiresAt = expiry;
+      existingPending.isApproved = false;
+      existingPending.hasVoted = false;
+      existingPending.votedParty = "";
+      await existingPending.save();
+    } else {
+      const newVoter = new Voter({
+        name: cleanName,
+        email: cleanEmail,
+        voterId: cleanVoterId,
+        password: cleanPassword,
+        aadhaar: cleanAadhaar,
+        mobile: cleanMobile,
+        emailVerified: false,
+        verificationOtp: otp,
+        otpExpiresAt: expiry,
+        isApproved: false,
+        hasVoted: false,
+        votedParty: "",
+      });
+
+      await newVoter.save();
+    }
 
     return res.status(201).json({
       success: true,
@@ -270,12 +300,29 @@ app.post("/api/register", async (req, res) => {
     });
   } catch (error) {
     console.log("Register error:", error);
+
+    if (error && error.code === 11000) {
+      const field = Object.keys(error.keyPattern || {})[0];
+      const messageMap = {
+        email: "Email already registered",
+        voterId: "Voter ID already registered",
+        aadhaar: "Aadhaar already registered",
+        mobile: "Mobile number already registered",
+      };
+
+      return res.status(400).json({
+        success: false,
+        message: messageMap[field] || "Duplicate data found",
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
     });
   }
 });
+
 app.post("/api/verify-email", async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -387,6 +434,7 @@ app.post("/api/resend-otp", async (req, res) => {
     });
   }
 });
+
 app.post("/api/login", async (req, res) => {
   try {
     const { email } = req.body;
@@ -478,6 +526,13 @@ app.post("/api/admin/approve", async (req, res) => {
   try {
     const { email } = req.body;
 
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
     const voter = await Voter.findOne({
       email: String(email).trim().toLowerCase(),
     });
@@ -486,6 +541,13 @@ app.post("/api/admin/approve", async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "User not found",
+      });
+    }
+
+    if (!voter.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is not verified yet",
       });
     }
 
@@ -516,46 +578,16 @@ app.post("/api/vote", async (req, res) => {
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
-    const cleanParty = String(party).trim();
+    const cleanParty = normalizeParty(party);
 
-    const voter = await Voter.findOne({ email: cleanEmail });
-
-    if (!voter) {
-      return res.status(404).json({
-        success: false,
-        message: "Voter not found",
-      });
-    }
-
-    if (!voter.emailVerified) {
-      return res.status(403).json({
-        success: false,
-        message: "Email not verified",
-      });
-    }
-
-    if (!voter.isApproved) {
-      return res.status(403).json({
-        success: false,
-        message: "Admin approval pending",
-      });
-    }
-
-    if (voter.hasVoted) {
+    if (!allowedParties.includes(cleanParty)) {
       return res.status(400).json({
         success: false,
-        message: "You have already voted",
+        message: "Invalid party selected",
       });
     }
 
-    let election = await Election.findOne().sort({ createdAt: -1 });
-
-    if (!election) {
-      election = await Election.create({
-        title: "National General Election 2026",
-        status: "live",
-      });
-    }
+    const election = await getLatestElection();
 
     if (election.status !== "live") {
       return res.status(400).json({
@@ -564,16 +596,86 @@ app.post("/api/vote", async (req, res) => {
       });
     }
 
-    const newVote = new Vote({
-      party: cleanParty,
-      voterEmail: cleanEmail,
-    });
+    const voter = await Voter.findOneAndUpdate(
+      {
+        email: cleanEmail,
+        emailVerified: true,
+        isApproved: true,
+        hasVoted: false,
+      },
+      {
+        $set: {
+          hasVoted: true,
+          votedParty: cleanParty,
+        },
+      },
+      { new: true }
+    );
 
-    await newVote.save();
+    if (!voter) {
+      const existingVoter = await Voter.findOne({ email: cleanEmail });
 
-    voter.hasVoted = true;
-    voter.votedParty = cleanParty;
-    await voter.save();
+      if (!existingVoter) {
+        return res.status(404).json({
+          success: false,
+          message: "Voter not found",
+        });
+      }
+
+      if (!existingVoter.emailVerified) {
+        return res.status(403).json({
+          success: false,
+          message: "Email not verified",
+        });
+      }
+
+      if (!existingVoter.isApproved) {
+        return res.status(403).json({
+          success: false,
+          message: "Admin approval pending",
+        });
+      }
+
+      if (existingVoter.hasVoted) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already voted",
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: "Voting failed",
+      });
+    }
+
+    try {
+      const newVote = new Vote({
+        party: cleanParty,
+        voterEmail: cleanEmail,
+      });
+
+      await newVote.save();
+    } catch (voteError) {
+      await Voter.updateOne(
+        { email: cleanEmail },
+        {
+          $set: {
+            hasVoted: false,
+            votedParty: "",
+          },
+        }
+      );
+
+      if (voteError && voteError.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already voted",
+        });
+      }
+
+      throw voteError;
+    }
 
     return res.status(200).json({
       success: true,
@@ -593,7 +695,7 @@ app.get("/api/results", async (req, res) => {
     const results = await Vote.aggregate([
       { $group: { _id: "$party", votes: { $sum: 1 } } },
       { $project: { _id: 0, party: "$_id", votes: 1 } },
-      { $sort: { votes: -1 } },
+      { $sort: { votes: -1, party: 1 } },
     ]);
 
     return res.status(200).json({
@@ -629,12 +731,19 @@ app.post("/api/admin/election", async (req, res) => {
   try {
     const { title, status } = req.body || {};
 
+    if (status && !["draft", "live", "closed"].includes(String(status).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid election status",
+      });
+    }
+
     let election = await Election.findOne().sort({ createdAt: -1 });
 
     if (!election) {
       election = new Election({
         title: title ? String(title).trim() : "National General Election 2026",
-        status: status || "live",
+        status: status ? String(status).trim() : "live",
       });
     } else {
       if (title) election.title = String(title).trim();
