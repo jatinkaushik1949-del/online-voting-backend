@@ -5,12 +5,6 @@ const nodemailer = require("nodemailer");
 require("dotenv").config();
 
 const app = express();
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/vote", require("./routes/voteRoutes"));
-app.use("/api/admin", require("./routes/adminRoutes"));
-app.use("/api/results", require("./routes/resultRoutes"));
-app.use("/api/election", require("./routes/electionRoutes"));
-app.use("/api/voters", require("./routes/voterRoutes"));
 
 app.use(
   cors({
