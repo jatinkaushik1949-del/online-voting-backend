@@ -765,6 +765,29 @@ app.post("/api/admin/election", async (req, res) => {
       message: error.message || "Election update failed",
     });
   }
+});app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+
+    const otp = generateOtp();
+
+    await sendOtpEmail(cleanEmail, otp, cleanName); // ✅ अब सही
+
+    return res.json({
+      success: true,
+      message: "OTP sent successfully",
+    });
+
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
 });
 
 app.post("/api/admin/reset", async (req, res) => {
