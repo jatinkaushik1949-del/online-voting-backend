@@ -24,11 +24,7 @@ mongoose
 
 const voterSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    name: { type: String, required: true, trim: true },
     email: {
       type: String,
       required: true,
@@ -149,7 +145,6 @@ const validateAadhaar = (aadhaar) => /^\d{12}$/.test(aadhaar);
 const validateMobile = (mobile) => /^\d{10}$/.test(mobile);
 
 const allowedParties = ["CONGRESS", "BJP", "BSP", "INLD"];
-
 const normalizeParty = (party) => String(party || "").trim().toUpperCase();
 
 const getLatestElection = async () => {
@@ -172,7 +167,6 @@ app.get("/", (req, res) => {
 app.get("/api/election", async (req, res) => {
   try {
     const election = await getLatestElection();
-
     return res.status(200).json({ success: true, election });
   } catch (error) {
     console.log("Election fetch error:", error);
@@ -180,19 +174,16 @@ app.get("/api/election", async (req, res) => {
   }
 });
 
-const otp = generateOtp();
-const expiry = new Date(Date.now() + 10 * 60 * 1000);
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, voterId, password, aadhaar, mobile } = req.body;
 
-try {
-  await sendOtpEmail(cleanEmail, otp, cleanName);
-} catch (mailError) {
-  console.log("OTP mail send error:", mailError);
-  return res.status(500).json({
-    success: false,
-    message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
-  });
-}
-    
+    if (!name || !email || !voterId || !aadhaar || !mobile) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
 
     const cleanName = String(name).trim();
     const cleanEmail = String(email).trim().toLowerCase();
@@ -222,35 +213,32 @@ try {
       });
     }
 
-    const duplicateEmailVerified = await Voter.findOne({
-      email: cleanEmail,
-      emailVerified: true,
-    });
-    if (duplicateEmailVerified) {
+    const existingEmail = await Voter.findOne({ email: cleanEmail });
+    if (existingEmail) {
       return res.status(400).json({
         success: false,
         message: "Email already registered",
       });
     }
 
-    const duplicateVoterId = await Voter.findOne({ voterId: cleanVoterId });
-    if (duplicateVoterId && duplicateVoterId.email !== cleanEmail) {
+    const existingVoterId = await Voter.findOne({ voterId: cleanVoterId });
+    if (existingVoterId) {
       return res.status(400).json({
         success: false,
         message: "Voter ID already registered",
       });
     }
 
-    const duplicateAadhaar = await Voter.findOne({ aadhaar: cleanAadhaar });
-    if (duplicateAadhaar && duplicateAadhaar.email !== cleanEmail) {
+    const existingAadhaar = await Voter.findOne({ aadhaar: cleanAadhaar });
+    if (existingAadhaar) {
       return res.status(400).json({
         success: false,
         message: "Aadhaar already registered",
       });
     }
 
-    const duplicateMobile = await Voter.findOne({ mobile: cleanMobile });
-    if (duplicateMobile && duplicateMobile.email !== cleanEmail) {
+    const existingMobile = await Voter.findOne({ mobile: cleanMobile });
+    if (existingMobile) {
       return res.status(400).json({
         success: false,
         message: "Mobile number already registered",
@@ -260,41 +248,32 @@ try {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    await sendOtpEmail(cleanEmail, otp, cleanName);
-
-    let existingPending = await Voter.findOne({ email: cleanEmail });
-
-    if (existingPending) {
-      existingPending.name = cleanName;
-      existingPending.voterId = cleanVoterId;
-      existingPending.password = cleanPassword;
-      existingPending.aadhaar = cleanAadhaar;
-      existingPending.mobile = cleanMobile;
-      existingPending.emailVerified = false;
-      existingPending.verificationOtp = otp;
-      existingPending.otpExpiresAt = expiry;
-      existingPending.isApproved = false;
-      existingPending.hasVoted = false;
-      existingPending.votedParty = "";
-      await existingPending.save();
-    } else {
-      const newVoter = new Voter({
-        name: cleanName,
-        email: cleanEmail,
-        voterId: cleanVoterId,
-        password: cleanPassword,
-        aadhaar: cleanAadhaar,
-        mobile: cleanMobile,
-        emailVerified: false,
-        verificationOtp: otp,
-        otpExpiresAt: expiry,
-        isApproved: false,
-        hasVoted: false,
-        votedParty: "",
+    try {
+      await sendOtpEmail(cleanEmail, otp, cleanName);
+    } catch (mailError) {
+      console.log("OTP mail send error:", mailError);
+      return res.status(500).json({
+        success: false,
+        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
       });
-
-      await newVoter.save();
     }
+
+    const newVoter = new Voter({
+      name: cleanName,
+      email: cleanEmail,
+      voterId: cleanVoterId,
+      password: cleanPassword,
+      aadhaar: cleanAadhaar,
+      mobile: cleanMobile,
+      emailVerified: false,
+      verificationOtp: otp,
+      otpExpiresAt: expiry,
+      isApproved: false,
+      hasVoted: false,
+      votedParty: "",
+    });
+
+    await newVoter.save();
 
     return res.status(201).json({
       success: true,
@@ -303,22 +282,6 @@ try {
     });
   } catch (error) {
     console.log("Register error:", error);
-
-    if (error && error.code === 11000) {
-      const field = Object.keys(error.keyPattern || {})[0];
-      const messageMap = {
-        email: "Email already registered",
-        voterId: "Voter ID already registered",
-        aadhaar: "Aadhaar already registered",
-        mobile: "Mobile number already registered",
-      };
-
-      return res.status(400).json({
-        success: false,
-        message: messageMap[field] || "Duplicate data found",
-      });
-    }
-
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -388,15 +351,16 @@ app.post("/api/verify-email", async (req, res) => {
   }
 });
 
-try {
-  await sendOtpEmail(voter.email, otp, voter.name);
-} catch (mailError) {
-  console.log("Resend OTP mail error:", mailError);
-  return res.status(500).json({
-    success: false,
-    message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
-  });
-}
+app.post("/api/resend-otp", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
 
     const cleanEmail = String(email).trim().toLowerCase();
     const voter = await Voter.findOne({ email: cleanEmail });
@@ -418,7 +382,15 @@ try {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    await sendOtpEmail(voter.email, otp, voter.name);
+    try {
+      await sendOtpEmail(voter.email, otp, voter.name);
+    } catch (mailError) {
+      console.log("Resend OTP mail error:", mailError);
+      return res.status(500).json({
+        success: false,
+        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
+      });
+    }
 
     voter.verificationOtp = otp;
     voter.otpExpiresAt = expiry;
@@ -428,13 +400,14 @@ try {
       success: true,
       message: "OTP resent successfully",
     });
-  catch (error) {
+  } catch (error) {
     console.log("Resend OTP error:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
     });
   }
+});
 
 app.post("/api/login", async (req, res) => {
   try {
@@ -566,6 +539,7 @@ app.post("/api/admin/approve", async (req, res) => {
     });
   }
 });
+
 app.post("/api/vote", async (req, res) => {
   try {
     const { email, party } = req.body || {};
@@ -762,155 +736,6 @@ app.post("/api/admin/election", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Election update failed",
-    });
-  }
-});app.post("/api/register", async (req, res) => {
-  try {
-    const { name, email, voterId, password, aadhaar, mobile } = req.body;
-
-    if (!name || !email || !voterId || !aadhaar || !mobile) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required",
-      });
-    }
-
-    const cleanName = String(name).trim();
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanVoterId = String(voterId).trim();
-    const cleanPassword = password ? String(password).trim() : "";
-    const cleanAadhaar = String(aadhaar).trim();
-    const cleanMobile = String(mobile).trim();
-
-    const otp = generateOtp();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000);
-
-    try {
-      await sendOtpEmail(cleanEmail, otp, cleanName);
-    } catch (mailError) {
-      console.log("OTP mail send error:", mailError);
-      return res.status(500).json({
-        success: false,
-        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
-      });
-    }
-
-    const existingEmail = await Voter.findOne({ email: cleanEmail });
-    if (existingEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
-      });
-    }
-
-    const existingVoterId = await Voter.findOne({ voterId: cleanVoterId });
-    if (existingVoterId) {
-      return res.status(400).json({
-        success: false,
-        message: "Voter ID already registered",
-      });
-    }
-
-    const existingAadhaar = await Voter.findOne({ aadhaar: cleanAadhaar });
-    if (existingAadhaar) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhaar already registered",
-      });
-    }
-
-    const existingMobile = await Voter.findOne({ mobile: cleanMobile });
-    if (existingMobile) {
-      return res.status(400).json({
-        success: false,
-        message: "Mobile number already registered",
-      });
-    }
-
-    const newVoter = new Voter({
-      name: cleanName,
-      email: cleanEmail,
-      voterId: cleanVoterId,
-      password: cleanPassword,
-      aadhaar: cleanAadhaar,
-      mobile: cleanMobile,
-      emailVerified: false,
-      verificationOtp: otp,
-      otpExpiresAt: expiry,
-      isApproved: false,
-      hasVoted: false,
-      votedParty: "",
-    });
-
-    await newVoter.save();
-
-    return res.status(201).json({
-      success: true,
-      message: "Registration successful. OTP sent to email.",
-      email: cleanEmail,
-    });
-  } catch (error) {
-    console.log("Register error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Server error",
-    });
-  }
-});
-app.post("/api/resend-otp", async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required",
-      });
-    }
-
-    const cleanEmail = String(email).trim().toLowerCase();
-    const voter = await Voter.findOne({ email: cleanEmail });
-
-    if (!voter) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    if (voter.emailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already verified",
-      });
-    }
-
-    const otp = generateOtp();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000);
-
-    try {
-      await sendOtpEmail(voter.email, otp, voter.name);
-    } catch (mailError) {
-      console.log("Resend OTP mail error:", mailError);
-      return res.status(500).json({
-        success: false,
-        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
-      });
-    }
-
-    voter.verificationOtp = otp;
-    voter.otpExpiresAt = expiry;
-    await voter.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "OTP resent successfully",
-    });
-  } catch (error) {
-    console.log("Resend OTP error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Server error",
     });
   }
 });
