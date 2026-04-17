@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const Candidate = require("./models/Candidate");
 require("dotenv").config();
 
 const app = express();
@@ -408,6 +409,57 @@ app.post("/api/resend-otp", async (req, res) => {
     });
   }
 });
+app.post("/api/admin/candidates", async (req, res) => {
+  try {
+    const {
+      candidateName,
+      partyName,
+      symbolUrl,
+      photoUrl,
+      description,
+    } = req.body || {};
+
+    if (!candidateName || !partyName) {
+      return res.status(400).json({
+        success: false,
+        message: "Candidate name and party name are required",
+      });
+    }
+
+    let election = await Election.findOne().sort({ createdAt: -1 });
+
+    if (!election) {
+      election = await Election.create({
+        title: "National General Election 2026",
+        status: "draft",
+      });
+    }
+
+    const candidate = new Candidate({
+      electionId: election._id,
+      candidateName: String(candidateName).trim(),
+      partyName: String(partyName).trim(),
+      symbolUrl: symbolUrl ? String(symbolUrl).trim() : "",
+      photoUrl: photoUrl ? String(photoUrl).trim() : "",
+      description: description ? String(description).trim() : "",
+      isActive: true,
+    });
+
+    await candidate.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Candidate added successfully",
+      candidate,
+    });
+  } catch (error) {
+    console.error("Add candidate error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+});
 
 app.post("/api/login", async (req, res) => {
   try {
@@ -684,6 +736,34 @@ app.get("/api/results", async (req, res) => {
     });
   }
 });
+app.get("/api/candidates", async (req, res) => {
+  try {
+    let election = await Election.findOne().sort({ createdAt: -1 });
+
+    if (!election) {
+      return res.status(200).json({
+        success: true,
+        candidates: [],
+      });
+    }
+
+    const candidates = await Candidate.find({
+      electionId: election._id,
+      isActive: true,
+    }).sort({ createdAt: 1 });
+
+    return res.status(200).json({
+      success: true,
+      candidates,
+    });
+  } catch (error) {
+    console.error("Fetch candidates error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+});
 
 app.get("/api/voters", async (req, res) => {
   try {
@@ -736,6 +816,31 @@ app.post("/api/admin/election", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Election update failed",
+    });
+  }
+});
+app.delete("/api/admin/candidates/:id", async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id);
+
+    if (!candidate) {
+      return res.status(404).json({
+        success: false,
+        message: "Candidate not found",
+      });
+    }
+
+    await Candidate.findByIdAndDelete(req.params.id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Candidate deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete candidate error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
     });
   }
 });
