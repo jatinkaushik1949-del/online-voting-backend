@@ -277,7 +277,7 @@ app.post("/api/register", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Registration successful. OTP sent to email.",
+      message: "OTP sent to your email. Please verify your email first.",
       email: cleanEmail,
     });
   } catch (error) {
@@ -296,7 +296,7 @@ app.post("/api/verify-email", async (req, res) => {
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
-        message: "Email and OTP are required",
+        message: "Email and OTP are required";
       });
     }
 
@@ -340,7 +340,7 @@ app.post("/api/verify-email", async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Email verified successfully. Wait for admin approval.",
+      message: "Email verified successfully. Wait for admin approval."
     });
   } catch (error) {
     console.log("Verify email error:", error);
