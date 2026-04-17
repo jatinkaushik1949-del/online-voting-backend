@@ -242,6 +242,10 @@ app.post("/api/register", async (req, res) => {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
+    // mail pehle bhejo
+    await sendOtpEmail(cleanEmail, otp, cleanName);
+
+    // mail successful ho tabhi save karo
     const newVoter = new Voter({
       name: cleanName,
       email: cleanEmail,
@@ -253,10 +257,11 @@ app.post("/api/register", async (req, res) => {
       verificationOtp: otp,
       otpExpiresAt: expiry,
       isApproved: false,
+      hasVoted: false,
+      votedParty: "",
     });
 
     await newVoter.save();
-    await sendOtpEmail(cleanEmail, otp, cleanName);
 
     return res.status(201).json({
       success: true,
@@ -271,7 +276,6 @@ app.post("/api/register", async (req, res) => {
     });
   }
 });
-
 app.post("/api/verify-email", async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -363,11 +367,13 @@ app.post("/api/resend-otp", async (req, res) => {
     }
 
     const otp = generateOtp();
-    voter.verificationOtp = otp;
-    voter.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await voter.save();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
     await sendOtpEmail(voter.email, otp, voter.name);
+
+    voter.verificationOtp = otp;
+    voter.otpExpiresAt = expiry;
+    await voter.save();
 
     return res.status(200).json({
       success: true,
@@ -381,7 +387,6 @@ app.post("/api/resend-otp", async (req, res) => {
     });
   }
 });
-
 app.post("/api/login", async (req, res) => {
   try {
     const { email } = req.body;
