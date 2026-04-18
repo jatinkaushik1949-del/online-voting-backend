@@ -462,6 +462,8 @@ app.post("/api/admin/candidates", async (req, res) => {
     const { candidateName, partyName, symbolUrl, photoUrl, description } =
       req.body || {};
 
+    console.log("ADD CANDIDATE BODY:", req.body);
+
     if (!candidateName || !partyName) {
       return res.status(400).json({
         success: false,
@@ -470,6 +472,7 @@ app.post("/api/admin/candidates", async (req, res) => {
     }
 
     const election = await getLatestElection();
+    console.log("LATEST ELECTION FOR ADD:", election);
 
     const candidate = new Candidate({
       electionId: election._id,
@@ -482,6 +485,7 @@ app.post("/api/admin/candidates", async (req, res) => {
     });
 
     await candidate.save();
+    console.log("CANDIDATE SAVED:", candidate);
 
     return res.status(201).json({
       success: true,
