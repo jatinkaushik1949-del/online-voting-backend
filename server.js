@@ -523,6 +523,22 @@ app.get("/api/candidates", async (req, res) => {
     });
   }
 });
+app.get("/api/debug/all-candidates", async (req, res) => {
+  try {
+    const candidates = await Candidate.find().sort({ createdAt: -1 });
+    res.status(200).json({
+      success: true,
+      count: candidates.length,
+      candidates,
+    });
+  } catch (error) {
+    console.error("Debug all candidates error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+});
 
 app.delete("/api/admin/candidates/:id", async (req, res) => {
   try {
