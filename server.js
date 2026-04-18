@@ -502,18 +502,10 @@ app.post("/api/admin/candidates", async (req, res) => {
 });
 
 app.get("/api/candidates", async (req, res) => {
-  console.log("CANDIDATES API HIT");
-
   try {
-    const election = await getLatestElection();
-    console.log("Election found:", election);
-
     const candidates = await Candidate.find({
-      electionId: election._id,
       isActive: true,
     }).sort({ createdAt: 1 });
-
-    console.log("Candidates found:", candidates);
 
     return res.status(200).json({
       success: true,
