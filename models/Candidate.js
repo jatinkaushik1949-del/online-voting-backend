@@ -2,11 +2,6 @@ const mongoose = require("mongoose");
 
 const candidateSchema = new mongoose.Schema(
   {
-    electionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Election",
-      required: true,
-    },
     candidateName: {
       type: String,
       required: true,
@@ -20,17 +15,14 @@ const candidateSchema = new mongoose.Schema(
     symbolUrl: {
       type: String,
       default: "",
-      trim: true,
     },
     photoUrl: {
       type: String,
       default: "",
-      trim: true,
     },
     description: {
       type: String,
       default: "",
-      trim: true,
     },
     isActive: {
       type: Boolean,
@@ -40,5 +32,4 @@ const candidateSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports =
-  mongoose.models.Candidate || mongoose.model("Candidate", candidateSchema);
+module.exports = mongoose.model("Candidate", candidateSchema);
