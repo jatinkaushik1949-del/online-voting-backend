@@ -19,6 +19,10 @@ const getEmailPass = () =>
 const getResendApiKey = () => String(process.env.RESEND_API_KEY || "").trim();
 const getResendFromEmail = () =>
   String(process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev").trim();
+const getGoogleMailScriptUrl = () =>
+  String(process.env.GOOGLE_MAIL_SCRIPT_URL || "").trim();
+const getGoogleMailScriptSecret = () =>
+  String(process.env.GOOGLE_MAIL_SCRIPT_SECRET || "").trim();
 
 app.use(
   cors({
@@ -61,6 +65,36 @@ const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOtpEmail = async (toEmail, otp, name) => {
+  if (getGoogleMailScriptUrl()) {
+    const googleMailResponse = await fetch(getGoogleMailScriptUrl(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        secret: getGoogleMailScriptSecret(),
+        to: toEmail,
+        subject: "OTP Verification",
+        text: `Hello ${name}, your OTP is ${otp}`,
+      }),
+    });
+
+    if (!googleMailResponse.ok) {
+      const errorText = await googleMailResponse.text();
+      throw new Error(`Google mail script failed: ${errorText}`);
+    }
+
+    const googleMailData = await googleMailResponse.json();
+
+    if (!googleMailData.success) {
+      throw new Error(
+        googleMailData.message || "Google mail script returned failure"
+      );
+    }
+
+    return;
+  }
+
   if (getResendApiKey()) {
     const resendResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -125,6 +159,16 @@ app.get("/api/test-route", (req, res) => {
 
 app.get("/api/mail-status", async (req, res) => {
   try {
+    if (getGoogleMailScriptUrl()) {
+      return res.status(200).json({
+        success: true,
+        message: "Google mail script configured",
+        provider: "google-mail-script",
+        googleMailScriptUrlPresent: true,
+        googleMailScriptSecretPresent: Boolean(getGoogleMailScriptSecret()),
+      });
+    }
+
     if (getResendApiKey()) {
       return res.status(200).json({
         success: true,
@@ -168,6 +212,7 @@ app.get("/api/mail-status", async (req, res) => {
       code: error.code || "",
       responseCode: error.responseCode || "",
       provider: "gmail-smtp",
+      googleMailScriptUrlPresent: Boolean(getGoogleMailScriptUrl()),
       resendApiKeyPresent: Boolean(getResendApiKey()),
       emailUserPresent: Boolean(getEmailUser()),
       emailPassLength: getEmailPass().length,
