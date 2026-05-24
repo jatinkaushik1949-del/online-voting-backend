@@ -207,7 +207,7 @@ app.post("/api/register", async (req, res) => {
     const cleanName = String(name).trim();
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanVoterId = String(voterId).trim();
-    const cleanPassword = password ? String(password).trim() : "";
+    const cleanPassword = password ? String(password).trim() : "not-set";
     const cleanAadhaar = String(aadhaar).trim();
     const cleanMobile = String(mobile).trim();
 
