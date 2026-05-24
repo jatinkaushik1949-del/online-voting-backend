@@ -11,6 +11,12 @@ const Vote = require("./models/Vote");
 
 const app = express();
 
+const getEmailUser = () => String(process.env.EMAIL_USER || "").trim();
+const getEmailPass = () =>
+  String(process.env.EMAIL_PASS || "")
+    .trim()
+    .replace(/\s+/g, "");
+
 app.use(
   cors({
     origin: "*",
@@ -33,8 +39,8 @@ const transporter = nodemailer.createTransport({
   port: 465,
   secure: true,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: getEmailUser(),
+    pass: getEmailPass(),
   },
   connectionTimeout: 30000,
 });
@@ -50,8 +56,14 @@ const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOtpEmail = async (toEmail, otp, name) => {
+  const emailUser = getEmailUser();
+
+  if (!emailUser || !getEmailPass()) {
+    throw new Error("EMAIL_USER or EMAIL_PASS is missing");
+  }
+
   await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+    from: emailUser,
     to: toEmail,
     subject: "OTP Verification",
     text: `Hello ${name}, your OTP is ${otp}`,
@@ -81,6 +93,46 @@ app.get("/", (req, res) => {
 
 app.get("/api/test-route", (req, res) => {
   res.json({ success: true, message: "New backend code is live" });
+});
+
+app.get("/api/mail-status", async (req, res) => {
+  try {
+    const emailUser = getEmailUser();
+    const emailPass = getEmailPass();
+
+    if (!emailUser || !emailPass) {
+      return res.status(500).json({
+        success: false,
+        message: "EMAIL_USER or EMAIL_PASS is missing",
+        emailUserPresent: Boolean(emailUser),
+        emailPassLength: emailPass.length,
+      });
+    }
+
+    await transporter.verify();
+
+    return res.status(200).json({
+      success: true,
+      message: "Mail server ready",
+      emailUserPresent: true,
+      emailPassLength: emailPass.length,
+    });
+  } catch (error) {
+    console.log("Mail status error:", {
+      code: error.code,
+      responseCode: error.responseCode,
+      message: error.message,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Mail verification failed",
+      code: error.code || "",
+      responseCode: error.responseCode || "",
+      emailUserPresent: Boolean(getEmailUser()),
+      emailPassLength: getEmailPass().length,
+    });
+  }
 });
 
 app.get("/api/election", async (req, res) => {
