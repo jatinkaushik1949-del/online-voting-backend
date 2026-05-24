@@ -29,11 +29,21 @@ mongoose
   .catch((err) => console.log("MongoDB connection error:", err));
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 30000,
+});
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("Mail Error:", error);
+  } else {
+    console.log("Mail server ready");
+  }
 });
 
 const generateOtp = () =>
@@ -43,16 +53,8 @@ const sendOtpEmail = async (toEmail, otp, name) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: toEmail,
-    subject: "Online Voting System - Email Verification OTP",
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>Email Verification</h2>
-        <p>Hello ${name || "User"},</p>
-        <p>Your verification OTP for Online Voting System is:</p>
-        <h1 style="letter-spacing: 4px;">${otp}</h1>
-        <p>This OTP will expire in 10 minutes.</p>
-      </div>
-    `,
+    subject: "OTP Verification",
+    text: `Hello ${name}, your OTP is ${otp}`,
   });
 };
 
@@ -77,12 +79,21 @@ app.get("/", (req, res) => {
   res.send("API is running...");
 });
 
+app.get("/api/test-route", (req, res) => {
+  res.json({ success: true, message: "New backend code is live" });
+});
+
 app.get("/api/election", async (req, res) => {
   try {
     const election = await getLatestElection();
-    return res.status(200).json({ success: true, election });
+
+    return res.status(200).json({
+      success: true,
+      election,
+    });
   } catch (error) {
     console.log("Election fetch error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -129,35 +140,19 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    const existingEmail = await User.findOne({ email: cleanEmail });
-    if (existingEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
-      });
-    }
+    const existingUser = await User.findOne({
+      $or: [
+        { email: cleanEmail },
+        { voterId: cleanVoterId },
+        { aadhaar: cleanAadhaar },
+        { mobile: cleanMobile },
+      ],
+    });
 
-    const existingVoterId = await User.findOne({ voterId: cleanVoterId });
-    if (existingVoterId) {
+    if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "Voter ID already registered",
-      });
-    }
-
-    const existingAadhaar = await User.findOne({ aadhaar: cleanAadhaar });
-    if (existingAadhaar) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhaar already registered",
-      });
-    }
-
-    const existingMobile = await User.findOne({ mobile: cleanMobile });
-    if (existingMobile) {
-      return res.status(400).json({
-        success: false,
-        message: "Mobile number already registered",
+        message: "Email, Voter ID, Aadhaar or Mobile already registered",
       });
     }
 
@@ -168,6 +163,7 @@ app.post("/api/register", async (req, res) => {
       await sendOtpEmail(cleanEmail, otp, cleanName);
     } catch (mailError) {
       console.log("OTP mail send error:", mailError);
+
       return res.status(500).json({
         success: false,
         message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
@@ -198,6 +194,7 @@ app.post("/api/register", async (req, res) => {
     });
   } catch (error) {
     console.log("Register error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -252,6 +249,7 @@ app.post("/api/verify-email", async (req, res) => {
     user.emailVerified = true;
     user.otp = "";
     user.otpExpiry = null;
+
     await user.save();
 
     return res.status(200).json({
@@ -260,6 +258,7 @@ app.post("/api/verify-email", async (req, res) => {
     });
   } catch (error) {
     console.log("Verify email error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -302,6 +301,7 @@ app.post("/api/resend-otp", async (req, res) => {
       await sendOtpEmail(user.email, otp, user.name);
     } catch (mailError) {
       console.log("Resend OTP mail error:", mailError);
+
       return res.status(500).json({
         success: false,
         message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
@@ -310,6 +310,7 @@ app.post("/api/resend-otp", async (req, res) => {
 
     user.otp = otp;
     user.otpExpiry = expiry;
+
     await user.save();
 
     return res.status(200).json({
@@ -318,6 +319,7 @@ app.post("/api/resend-otp", async (req, res) => {
     });
   } catch (error) {
     console.log("Resend OTP error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -370,10 +372,12 @@ app.post("/api/login", async (req, res) => {
         aadhaar: user.aadhaar,
         mobile: user.mobile,
         hasVoted: user.hasVoted,
+        votedParty: user.votedParty,
       },
     });
   } catch (error) {
     console.log("Login error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -392,7 +396,9 @@ app.post("/api/admin/login", (req, res) => {
       });
     }
 
-    if (String(password).trim() === "admin123") {
+    const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+
+    if (String(password).trim() === adminPassword) {
       return res.status(200).json({
         success: true,
         message: "Login successful",
@@ -405,9 +411,49 @@ app.post("/api/admin/login", (req, res) => {
     });
   } catch (error) {
     console.log("Admin login error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
+    });
+  }
+});
+
+app.get("/api/voters", async (req, res) => {
+  try {
+    const voters = await User.find().select("-password -otp");
+
+    return res.status(200).json({
+      success: true,
+      voters,
+    });
+  } catch (error) {
+    console.log("Fetch voters error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
+app.get("/api/admin/pending-voters", async (req, res) => {
+  try {
+    const voters = await User.find({
+      emailVerified: true,
+      isApproved: false,
+    }).select("-password -otp");
+
+    return res.status(200).json({
+      success: true,
+      voters,
+    });
+  } catch (error) {
+    console.log("Pending voters error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
     });
   }
 });
@@ -442,6 +488,7 @@ app.post("/api/admin/approve", async (req, res) => {
     }
 
     user.isApproved = true;
+
     await user.save();
 
     return res.status(200).json({
@@ -450,9 +497,10 @@ app.post("/api/admin/approve", async (req, res) => {
     });
   } catch (error) {
     console.log("Approve error:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });
@@ -462,8 +510,6 @@ app.post("/api/admin/candidates", async (req, res) => {
     const { candidateName, partyName, symbolUrl, photoUrl, description } =
       req.body || {};
 
-    console.log("ADD CANDIDATE BODY:", req.body);
-
     if (!candidateName || !partyName) {
       return res.status(400).json({
         success: false,
@@ -472,7 +518,6 @@ app.post("/api/admin/candidates", async (req, res) => {
     }
 
     const election = await getLatestElection();
-    console.log("LATEST ELECTION FOR ADD:", election);
 
     const candidate = new Candidate({
       electionId: election._id,
@@ -485,7 +530,6 @@ app.post("/api/admin/candidates", async (req, res) => {
     });
 
     await candidate.save();
-    console.log("CANDIDATE SAVED:", candidate);
 
     return res.status(201).json({
       success: true,
@@ -494,6 +538,7 @@ app.post("/api/admin/candidates", async (req, res) => {
     });
   } catch (error) {
     console.error("Add candidate error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -513,25 +558,29 @@ app.get("/api/candidates", async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch candidates error:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });
+
 app.get("/api/debug/all-candidates", async (req, res) => {
   try {
     const candidates = await Candidate.find().sort({ createdAt: -1 });
-    res.status(200).json({
+
+    return res.status(200).json({
       success: true,
       count: candidates.length,
       candidates,
     });
   } catch (error) {
     console.error("Debug all candidates error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });
@@ -555,9 +604,10 @@ app.delete("/api/admin/candidates/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Delete candidate error:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });
@@ -682,6 +732,7 @@ app.post("/api/vote", async (req, res) => {
     });
   } catch (error) {
     console.error("Vote route crash:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Vote submit failed",
@@ -720,25 +771,10 @@ app.get("/api/results", async (req, res) => {
     });
   } catch (error) {
     console.log("Results error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Server error",
-    });
-  }
-});
 
-app.get("/api/voters", async (req, res) => {
-  try {
-    const voters = await User.find().select("-password -otp");
-    return res.status(200).json({
-      success: true,
-      voters,
-    });
-  } catch (error) {
-    console.log("Fetch voters error:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });
@@ -775,9 +811,10 @@ app.post("/api/admin/election", async (req, res) => {
     });
   } catch (error) {
     console.error("Admin election route crash:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message || "Election update failed",
+      message: "Election update failed",
     });
   }
 });
@@ -801,10 +838,10 @@ app.post("/api/admin/reset", async (req, res) => {
     if (!election) {
       election = await Election.create({
         title: "National General Election 2026",
-        status: "draft",
+        status: "closed",
       });
     } else {
-      election.status = "draft";
+      election.status = "closed";
       await election.save();
     }
 
@@ -814,14 +851,12 @@ app.post("/api/admin/reset", async (req, res) => {
     });
   } catch (error) {
     console.error("Admin reset route crash:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message || "Election reset failed",
+      message: "Election reset failed",
     });
   }
-});
-app.get("/api/test-route", (req, res) => {
-  res.json({ success: true, message: "New backend code is live" });
 });
 
 const PORT = process.env.PORT || 5000;
