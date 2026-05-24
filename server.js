@@ -786,6 +786,42 @@ app.post("/api/vote", async (req, res) => {
       });
     }
 
+    const existingUser = await User.findOne({ email: cleanEmail });
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Voter not found",
+      });
+    }
+
+    if (!existingUser.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Email not verified",
+      });
+    }
+
+    if (!existingUser.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Admin approval pending",
+      });
+    }
+
+    const existingVote = await Vote.findOne({ voterEmail: cleanEmail });
+
+    if (existingVote) {
+      if (existingUser.hasVoted) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already voted",
+        });
+      }
+
+      await Vote.deleteOne({ _id: existingVote._id });
+    }
+
     const user = await User.findOneAndUpdate(
       {
         email: cleanEmail,
@@ -803,29 +839,6 @@ app.post("/api/vote", async (req, res) => {
     );
 
     if (!user) {
-      const existingUser = await User.findOne({ email: cleanEmail });
-
-      if (!existingUser) {
-        return res.status(404).json({
-          success: false,
-          message: "Voter not found",
-        });
-      }
-
-      if (!existingUser.emailVerified) {
-        return res.status(403).json({
-          success: false,
-          message: "Email not verified",
-        });
-      }
-
-      if (!existingUser.isApproved) {
-        return res.status(403).json({
-          success: false,
-          message: "Admin approval pending",
-        });
-      }
-
       if (existingUser.hasVoted) {
         return res.status(400).json({
           success: false,
