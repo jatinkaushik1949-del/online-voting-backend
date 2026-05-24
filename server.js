@@ -16,6 +16,9 @@ const getEmailPass = () =>
   String(process.env.EMAIL_PASS || "")
     .trim()
     .replace(/\s+/g, "");
+const getResendApiKey = () => String(process.env.RESEND_API_KEY || "").trim();
+const getResendFromEmail = () =>
+  String(process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev").trim();
 
 app.use(
   cors({
@@ -58,6 +61,29 @@ const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOtpEmail = async (toEmail, otp, name) => {
+  if (getResendApiKey()) {
+    const resendResponse = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getResendApiKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: getResendFromEmail(),
+        to: toEmail,
+        subject: "OTP Verification",
+        text: `Hello ${name}, your OTP is ${otp}`,
+      }),
+    });
+
+    if (!resendResponse.ok) {
+      const errorText = await resendResponse.text();
+      throw new Error(`Resend email failed: ${errorText}`);
+    }
+
+    return;
+  }
+
   const emailUser = getEmailUser();
 
   if (!emailUser || !getEmailPass()) {
@@ -99,6 +125,15 @@ app.get("/api/test-route", (req, res) => {
 
 app.get("/api/mail-status", async (req, res) => {
   try {
+    if (getResendApiKey()) {
+      return res.status(200).json({
+        success: true,
+        message: "Resend email API configured",
+        provider: "resend",
+        resendFromEmailPresent: Boolean(getResendFromEmail()),
+      });
+    }
+
     const emailUser = getEmailUser();
     const emailPass = getEmailPass();
 
@@ -116,6 +151,7 @@ app.get("/api/mail-status", async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Mail server ready",
+      provider: "gmail-smtp",
       emailUserPresent: true,
       emailPassLength: emailPass.length,
     });
@@ -131,6 +167,8 @@ app.get("/api/mail-status", async (req, res) => {
       message: error.message || "Mail verification failed",
       code: error.code || "",
       responseCode: error.responseCode || "",
+      provider: "gmail-smtp",
+      resendApiKeyPresent: Boolean(getResendApiKey()),
       emailUserPresent: Boolean(getEmailUser()),
       emailPassLength: getEmailPass().length,
     });
