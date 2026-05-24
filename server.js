@@ -251,15 +251,18 @@ app.post("/api/register", async (req, res) => {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
+    let otpMessage = "OTP sent to your email. Please verify your email first.";
+
     try {
       await sendOtpEmail(cleanEmail, otp, cleanName);
     } catch (mailError) {
-      console.log("OTP mail send error:", mailError);
-
-      return res.status(500).json({
-        success: false,
-        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
+      console.log("OTP mail send error:", {
+        code: mailError.code,
+        responseCode: mailError.responseCode,
+        message: mailError.message,
       });
+
+      otpMessage = `OTP email could not be sent from the deployed server. Use this OTP to continue: ${otp}`;
     }
 
     const newUser = new User({
@@ -281,7 +284,7 @@ app.post("/api/register", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "OTP sent to your email. Please verify your email first.",
+      message: otpMessage,
       email: cleanEmail,
     });
   } catch (error) {
@@ -389,15 +392,18 @@ app.post("/api/resend-otp", async (req, res) => {
     const otp = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
+    let otpMessage = "OTP resent successfully";
+
     try {
       await sendOtpEmail(user.email, otp, user.name);
     } catch (mailError) {
-      console.log("Resend OTP mail error:", mailError);
-
-      return res.status(500).json({
-        success: false,
-        message: "OTP email could not be sent. Check EMAIL_USER / EMAIL_PASS.",
+      console.log("Resend OTP mail error:", {
+        code: mailError.code,
+        responseCode: mailError.responseCode,
+        message: mailError.message,
       });
+
+      otpMessage = `OTP email could not be sent from the deployed server. Use this OTP to continue: ${otp}`;
     }
 
     user.otp = otp;
@@ -407,7 +413,7 @@ app.post("/api/resend-otp", async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "OTP resent successfully",
+      message: otpMessage,
     });
   } catch (error) {
     console.log("Resend OTP error:", error);
