@@ -993,14 +993,24 @@ app.post("/api/vote", async (req, res) => {
     const existingVote = await Vote.findOne({ voterEmail: cleanEmail });
 
     if (existingVote) {
-      if (existingUser.hasVoted) {
-        return res.status(400).json({
-          success: false,
-          message: "You have already voted",
-        });
-      }
+      return res.status(400).json({
+        success: false,
+        message: "You have already voted",
+      });
+    }
 
-      await Vote.deleteOne({ _id: existingVote._id });
+    if (existingUser.hasVoted) {
+      console.log("Healing stale hasVoted flag with no vote record:", cleanEmail);
+
+      await User.updateOne(
+        { _id: existingUser._id },
+        {
+          $set: {
+            hasVoted: false,
+            votedParty: "",
+          },
+        }
+      );
     }
 
     const user = await User.findOneAndUpdate(
