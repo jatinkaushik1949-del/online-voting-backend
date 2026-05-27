@@ -136,6 +136,16 @@ const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validateAadhaar = (aadhaar) => /^\d{12}$/.test(aadhaar);
 const validateMobile = (mobile) => /^\d{10}$/.test(mobile);
 
+const getVoterPayload = (user) => ({
+  name: user.name,
+  email: user.email,
+  voterId: user.voterId,
+  aadhaar: user.aadhaar,
+  mobile: user.mobile,
+  hasVoted: user.hasVoted,
+  votedParty: user.votedParty,
+});
+
 const getLatestElection = async () => {
   let election = await Election.findOne().sort({ createdAt: -1 });
 
@@ -508,18 +518,159 @@ app.post("/api/login", async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      voter: {
-        name: user.name,
-        email: user.email,
-        voterId: user.voterId,
-        aadhaar: user.aadhaar,
-        mobile: user.mobile,
-        hasVoted: user.hasVoted,
-        votedParty: user.votedParty,
-      },
+      voter: getVoterPayload(user),
     });
   } catch (error) {
     console.log("Login error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+});
+
+app.post("/api/login/request-otp", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    if (!validateEmail(cleanEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email format",
+      });
+    }
+
+    const user = await User.findOne({ email: cleanEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Please verify your email first",
+      });
+    }
+
+    if (!user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is pending admin approval",
+      });
+    }
+
+    const loginOtp = generateOtp();
+    const loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    let otpMessage = "Login OTP sent to your email";
+
+    try {
+      await sendOtpEmail(user.email, loginOtp, user.name);
+    } catch (mailError) {
+      console.log("Login OTP mail error:", {
+        code: mailError.code,
+        responseCode: mailError.responseCode,
+        message: mailError.message,
+      });
+
+      otpMessage = `Login OTP email could not be sent from the deployed server. Use this OTP to continue: ${loginOtp}`;
+    }
+
+    user.loginOtp = loginOtp;
+    user.loginOtpExpiry = loginOtpExpiry;
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: otpMessage,
+      email: user.email,
+    });
+  } catch (error) {
+    console.log("Login OTP request error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  }
+});
+
+app.post("/api/login/verify-otp", async (req, res) => {
+  try {
+    const { email, otp } = req.body || {};
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required",
+      });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanOtp = String(otp).trim();
+    const user = await User.findOne({ email: cleanEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Please verify your email first",
+      });
+    }
+
+    if (!user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is pending admin approval",
+      });
+    }
+
+    if (!user.loginOtp || user.loginOtp !== cleanOtp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid login OTP",
+      });
+    }
+
+    if (!user.loginOtpExpiry || user.loginOtpExpiry < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "Login OTP expired",
+      });
+    }
+
+    user.loginOtp = "";
+    user.loginOtpExpiry = null;
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      voter: getVoterPayload(user),
+    });
+  } catch (error) {
+    console.log("Login OTP verify error:", error);
 
     return res.status(500).json({
       success: false,
@@ -564,7 +715,7 @@ app.post("/api/admin/login", (req, res) => {
 
 app.get("/api/voters", async (req, res) => {
   try {
-    const voters = await User.find().select("-password -otp");
+    const voters = await User.find().select("-password -otp -loginOtp");
 
     return res.status(200).json({
       success: true,
@@ -585,7 +736,7 @@ app.get("/api/admin/pending-voters", async (req, res) => {
     const voters = await User.find({
       emailVerified: true,
       isApproved: false,
-    }).select("-password -otp");
+    }).select("-password -otp -loginOtp");
 
     return res.status(200).json({
       success: true,
