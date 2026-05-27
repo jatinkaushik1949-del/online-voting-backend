@@ -1141,7 +1141,7 @@ const getElectionResults = async () => {
   ]);
 };
 
-const createAdminToken = () => {
+function createAdminToken() {
   const payload = Buffer.from(
     JSON.stringify({
       role: "admin",
@@ -1154,9 +1154,9 @@ const createAdminToken = () => {
     .digest("base64url");
 
   return `${payload}.${signature}`;
-};
+}
 
-const isValidAdminToken = (token) => {
+function isValidAdminToken(token) {
   if (!token || !token.includes(".")) return false;
 
   const [payload, signature] = token.split(".");
@@ -1180,9 +1180,9 @@ const isValidAdminToken = (token) => {
   } catch {
     return false;
   }
-};
+}
 
-const requireAdminAuth = (req, res, next) => {
+function requireAdminAuth(req, res, next) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
@@ -1194,7 +1194,7 @@ const requireAdminAuth = (req, res, next) => {
   }
 
   next();
-};
+}
 
 app.post("/api/public-results", async (req, res) => {
   try {
