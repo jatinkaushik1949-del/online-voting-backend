@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 require("dotenv").config();
 
 const Candidate = require("./models/Candidate");
@@ -23,6 +24,9 @@ const getGoogleMailScriptUrl = () =>
   String(process.env.GOOGLE_MAIL_SCRIPT_URL || "").trim();
 const getGoogleMailScriptSecret = () =>
   String(process.env.GOOGLE_MAIL_SCRIPT_SECRET || "").trim();
+const getAdminPassword = () => String(process.env.ADMIN_PASSWORD || "admin123").trim();
+const getAdminTokenSecret = () =>
+  String(process.env.ADMIN_TOKEN_SECRET || getAdminPassword()).trim();
 
 app.use(
   cors({
@@ -691,12 +695,11 @@ app.post("/api/admin/login", (req, res) => {
       });
     }
 
-    const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
-
-    if (String(password).trim() === adminPassword) {
+    if (String(password).trim() === getAdminPassword()) {
       return res.status(200).json({
         success: true,
         message: "Login successful",
+        token: createAdminToken(),
       });
     }
 
@@ -714,7 +717,7 @@ app.post("/api/admin/login", (req, res) => {
   }
 });
 
-app.get("/api/voters", async (req, res) => {
+app.get("/api/voters", requireAdminAuth, async (req, res) => {
   try {
     const voters = await User.find().select("-password -otp -loginOtp");
 
@@ -732,7 +735,7 @@ app.get("/api/voters", async (req, res) => {
   }
 });
 
-app.get("/api/admin/pending-voters", async (req, res) => {
+app.get("/api/admin/pending-voters", requireAdminAuth, async (req, res) => {
   try {
     const voters = await User.find({
       emailVerified: true,
@@ -753,7 +756,7 @@ app.get("/api/admin/pending-voters", async (req, res) => {
   }
 });
 
-app.post("/api/admin/approve", async (req, res) => {
+app.post("/api/admin/approve", requireAdminAuth, async (req, res) => {
   try {
     const { email } = req.body || {};
 
@@ -800,7 +803,7 @@ app.post("/api/admin/approve", async (req, res) => {
   }
 });
 
-app.post("/api/admin/candidates", async (req, res) => {
+app.post("/api/admin/candidates", requireAdminAuth, async (req, res) => {
   try {
     const { candidateName, partyName, symbolUrl, photoUrl, description } =
       req.body || {};
@@ -861,7 +864,7 @@ app.get("/api/candidates", async (req, res) => {
   }
 });
 
-app.get("/api/debug/all-candidates", async (req, res) => {
+app.get("/api/debug/all-candidates", requireAdminAuth, async (req, res) => {
   try {
     const candidates = await Candidate.find().sort({ createdAt: -1 });
 
@@ -880,7 +883,7 @@ app.get("/api/debug/all-candidates", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/candidates/:id", async (req, res) => {
+app.delete("/api/admin/candidates/:id", requireAdminAuth, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id);
 
@@ -1112,6 +1115,61 @@ const getElectionResults = async () => {
   ]);
 };
 
+const createAdminToken = () => {
+  const payload = Buffer.from(
+    JSON.stringify({
+      role: "admin",
+      exp: Date.now() + 12 * 60 * 60 * 1000,
+    })
+  ).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", getAdminTokenSecret())
+    .update(payload)
+    .digest("base64url");
+
+  return `${payload}.${signature}`;
+};
+
+const isValidAdminToken = (token) => {
+  if (!token || !token.includes(".")) return false;
+
+  const [payload, signature] = token.split(".");
+  const expectedSignature = crypto
+    .createHmac("sha256", getAdminTokenSecret())
+    .update(payload)
+    .digest("base64url");
+
+  try {
+    if (
+      !crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expectedSignature)
+      )
+    ) {
+      return false;
+    }
+
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return data.role === "admin" && Number(data.exp) > Date.now();
+  } catch {
+    return false;
+  }
+};
+
+const requireAdminAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  if (!isValidAdminToken(token)) {
+    return res.status(401).json({
+      success: false,
+      message: "Admin authentication required",
+    });
+  }
+
+  next();
+};
+
 app.post("/api/public-results", async (req, res) => {
   try {
     const { email } = req.body || {};
@@ -1167,7 +1225,7 @@ app.post("/api/public-results", async (req, res) => {
   }
 });
 
-app.post("/api/admin/election", async (req, res) => {
+app.post("/api/admin/election", requireAdminAuth, async (req, res) => {
   try {
     const { title, status, resultsPublished } = req.body || {};
 
@@ -1211,7 +1269,7 @@ app.post("/api/admin/election", async (req, res) => {
   }
 });
 
-app.post("/api/admin/reset", async (req, res) => {
+app.post("/api/admin/reset", requireAdminAuth, async (req, res) => {
   try {
     await Vote.deleteMany({});
 
