@@ -11,7 +11,7 @@ const User = require("./models/User");
 const Vote = require("./models/Vote");
 
 const app = express();
-const API_BUILD_ID = "vote-state-heal-2026-05-27-2";
+const API_BUILD_ID = "vote-state-heal-2026-05-27-3";
 
 const getEmailUser = () => String(process.env.EMAIL_USER || "").trim();
 const getEmailPass = () =>
@@ -1092,6 +1092,26 @@ app.post("/api/vote", async (req, res) => {
 
       await newVote.save();
     } catch (voteError) {
+      if (voteError && voteError.code === 11000 && !existingUser.hasVoted) {
+        console.log("Retrying vote after duplicate stale record:", cleanEmail);
+
+        await Vote.deleteMany({ voterEmail: cleanEmail });
+
+        const retryVote = new Vote({
+          candidateId: candidate._id,
+          candidateName: candidate.candidateName,
+          partyName: candidate.partyName,
+          voterEmail: cleanEmail,
+        });
+
+        await retryVote.save();
+
+        return res.status(200).json({
+          success: true,
+          message: "Vote submitted successfully",
+        });
+      }
+
       await User.updateOne(
         { email: cleanEmail },
         {
