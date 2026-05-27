@@ -993,10 +993,15 @@ app.post("/api/vote", async (req, res) => {
     const existingVote = await Vote.findOne({ voterEmail: cleanEmail });
 
     if (existingVote) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already voted",
-      });
+      if (existingUser.hasVoted) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already voted",
+        });
+      }
+
+      console.log("Removing stale vote record with false user flag:", cleanEmail);
+      await Vote.deleteOne({ _id: existingVote._id });
     }
 
     if (existingUser.hasVoted) {
