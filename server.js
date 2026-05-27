@@ -153,6 +153,7 @@ const getLatestElection = async () => {
     election = await Election.create({
       title: "National General Election 2026",
       status: "live",
+      resultsPublished: false,
     });
   }
 
@@ -1086,9 +1087,89 @@ app.get("/api/results", async (req, res) => {
   }
 });
 
+const getElectionResults = async () => {
+  return Vote.aggregate([
+    {
+      $group: {
+        _id: {
+          candidateId: "$candidateId",
+          candidateName: "$candidateName",
+          partyName: "$partyName",
+        },
+        votes: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        candidateId: "$_id.candidateId",
+        candidateName: "$_id.candidateName",
+        partyName: "$_id.partyName",
+        votes: 1,
+      },
+    },
+    { $sort: { votes: -1, candidateName: 1 } },
+  ]);
+};
+
+app.post("/api/public-results", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail });
+
+    if (!user || !user.emailVerified || !user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Only verified approved voters can view published results",
+      });
+    }
+
+    const election = await getLatestElection();
+
+    if (!election.resultsPublished) {
+      return res.status(403).json({
+        success: false,
+        message: "Results are not published yet",
+        election,
+      });
+    }
+
+    const results = await getElectionResults();
+    const totalVotes = results.reduce(
+      (sum, item) => sum + Number(item.votes || 0),
+      0
+    );
+    const winner = results.length ? results[0] : null;
+
+    return res.status(200).json({
+      success: true,
+      election,
+      results,
+      totalVotes,
+      winner,
+    });
+  } catch (error) {
+    console.log("Public results error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
 app.post("/api/admin/election", async (req, res) => {
   try {
-    const { title, status } = req.body || {};
+    const { title, status, resultsPublished } = req.body || {};
 
     if (status && !["draft", "live", "closed"].includes(String(status).trim())) {
       return res.status(400).json({
@@ -1103,10 +1184,14 @@ app.post("/api/admin/election", async (req, res) => {
       election = new Election({
         title: title ? String(title).trim() : "National General Election 2026",
         status: status ? String(status).trim() : "live",
+        resultsPublished: Boolean(resultsPublished),
       });
     } else {
       if (title) election.title = String(title).trim();
       if (status) election.status = String(status).trim();
+      if (typeof resultsPublished === "boolean") {
+        election.resultsPublished = resultsPublished;
+      }
     }
 
     await election.save();
@@ -1146,15 +1231,18 @@ app.post("/api/admin/reset", async (req, res) => {
       election = await Election.create({
         title: "National General Election 2026",
         status: "closed",
+        resultsPublished: false,
       });
     } else {
       election.status = "closed";
+      election.resultsPublished = false;
       await election.save();
     }
 
     return res.status(200).json({
       success: true,
       message: "Election reset successfully",
+      election,
     });
   } catch (error) {
     console.error("Admin reset route crash:", error);

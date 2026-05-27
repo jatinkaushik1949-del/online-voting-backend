@@ -8,11 +8,14 @@ const electionSchema = new mongoose.Schema(
       trim: true,
       default: "National General Election 2026",
     },
-
     status: {
       type: String,
       enum: ["draft", "live", "closed"],
       default: "draft",
+    },
+    resultsPublished: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }
