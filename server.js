@@ -11,6 +11,7 @@ const User = require("./models/User");
 const Vote = require("./models/Vote");
 
 const app = express();
+const API_BUILD_ID = "vote-state-heal-2026-05-27-2";
 
 const getEmailUser = () => String(process.env.EMAIL_USER || "").trim();
 const getEmailPass = () =>
@@ -168,8 +169,37 @@ const getLatestElection = async () => {
   return election;
 };
 
+const healVoterVoteState = async (user) => {
+  if (!user || !user.email) return user;
+
+  const cleanEmail = String(user.email).trim().toLowerCase();
+  const existingVote = await Vote.findOne({ voterEmail: cleanEmail });
+
+  if (existingVote && !user.hasVoted) {
+    console.log("Removing stale vote record during login:", cleanEmail);
+    await Vote.deleteOne({ _id: existingVote._id });
+    return user;
+  }
+
+  if (!existingVote && user.hasVoted) {
+    console.log("Resetting stale hasVoted flag during login:", cleanEmail);
+    user.hasVoted = false;
+    user.votedParty = "";
+    await user.save();
+  }
+
+  return user;
+};
+
 app.get("/", (req, res) => {
   res.send("API is running...");
+});
+
+app.get("/api/deploy-version", (req, res) => {
+  res.json({
+    success: true,
+    buildId: API_BUILD_ID,
+  });
 });
 
 app.get("/api/test-route", (req, res) => {
@@ -524,10 +554,12 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
+    const healedUser = await healVoterVoteState(user);
+
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      voter: getVoterPayload(user),
+      voter: getVoterPayload(healedUser),
     });
   } catch (error) {
     console.log("Login error:", error);
@@ -673,10 +705,12 @@ app.post("/api/login/verify-otp", async (req, res) => {
 
     await user.save();
 
+    const healedUser = await healVoterVoteState(user);
+
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      voter: getVoterPayload(user),
+      voter: getVoterPayload(healedUser),
     });
   } catch (error) {
     console.log("Login OTP verify error:", error);
