@@ -27,6 +27,10 @@ const getGoogleMailScriptSecret = () =>
 const getAdminPassword = () => String(process.env.ADMIN_PASSWORD || "admin123").trim();
 const getAdminTokenSecret = () =>
   String(process.env.ADMIN_TOKEN_SECRET || getAdminPassword()).trim();
+const getAdminEmail = () =>
+  String(process.env.ADMIN_EMAIL || "jatinkaushik1949@gmail.com").trim().toLowerCase();
+
+const adminOtpStore = new Map();
 
 app.use(
   cors({
@@ -684,7 +688,7 @@ app.post("/api/login/verify-otp", async (req, res) => {
   }
 });
 
-app.post("/api/admin/login", (req, res) => {
+app.post("/api/admin/login", async (req, res) => {
   try {
     const { password } = req.body || {};
 
@@ -696,10 +700,32 @@ app.post("/api/admin/login", (req, res) => {
     }
 
     if (String(password).trim() === getAdminPassword()) {
+      const otp = generateOtp();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+      let message = `Admin OTP sent to ${getAdminEmail()}`;
+
+      adminOtpStore.set(getAdminEmail(), {
+        otp,
+        expiresAt,
+      });
+
+      try {
+        await sendOtpEmail(getAdminEmail(), otp, "Admin");
+      } catch (mailError) {
+        console.log("Admin OTP mail error:", {
+          code: mailError.code,
+          responseCode: mailError.responseCode,
+          message: mailError.message,
+        });
+
+        message = `Admin OTP email could not be sent. Use this OTP to continue: ${otp}`;
+      }
+
       return res.status(200).json({
         success: true,
-        message: "Login successful",
-        token: createAdminToken(),
+        message,
+        otpRequired: true,
+        adminEmail: getAdminEmail(),
       });
     }
 
@@ -1221,6 +1247,58 @@ app.post("/api/public-results", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
+    });
+  }
+});
+
+app.post("/api/admin/verify-otp", (req, res) => {
+  try {
+    const { otp } = req.body || {};
+
+    if (!otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin OTP is required",
+      });
+    }
+
+    const savedOtp = adminOtpStore.get(getAdminEmail());
+
+    if (!savedOtp) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin OTP not requested",
+      });
+    }
+
+    if (savedOtp.expiresAt < Date.now()) {
+      adminOtpStore.delete(getAdminEmail());
+      return res.status(400).json({
+        success: false,
+        message: "Admin OTP expired",
+      });
+    }
+
+    if (String(otp).trim() !== savedOtp.otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid admin OTP",
+      });
+    }
+
+    adminOtpStore.delete(getAdminEmail());
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin login successful",
+      token: createAdminToken(),
+    });
+  } catch (error) {
+    console.log("Admin OTP verify error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
     });
   }
 });
